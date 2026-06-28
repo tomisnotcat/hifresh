@@ -389,10 +389,36 @@
               </div>
               
               <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-1">商品图片链接</label>
-                <input type="url" x-model="newProduct.image_url"
-                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
-                  placeholder="https://example.com/image.jpg">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品图片</label>
+                <div class="border-2 border-dashed border-gray-200 rounded-xl p-4 text-center hover:border-primary transition cursor-pointer"
+                  :class="{ 'border-primary bg-orange-50': newProduct.image_url || newProduct.imageFile }"
+                  @click="$refs.imageInput.click()"
+                  @dragover.prevent="$el.classList.add('border-primary')"
+                  @dragleave="$el.classList.remove('border-primary')"
+                  @drop.prevent="handleImageDrop($event)">
+                  <template x-if="!newProduct.image_url && !newProduct.imageFile">
+                    <div>
+                      <div class="text-4xl mb-2">📷</div>
+                      <p class="text-sm text-gray-500">点击或拖拽上传图片</p>
+                      <p class="text-xs text-gray-400 mt-1">支持 JPG、PNG、WebP，最大 5MB</p>
+                    </div>
+                  </template>
+                  <template x-if="newProduct.imageFile && !newProduct.image_url">
+                    <div>
+                      <div class="text-4xl mb-2">⏳</div>
+                      <p class="text-sm text-gray-500">正在上传...</p>
+                    </div>
+                  </template>
+                  <template x-if="newProduct.image_url && !newProduct.imageFile">
+                    <div class="relative">
+                      <img :src="newProduct.image_url" class="max-h-48 mx-auto rounded-lg object-contain">
+                      <button type="button" @click.stop="newProduct.image_url = ''" 
+                        class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full text-xs hover:bg-red-600">✕</button>
+                    </div>
+                  </template>
+                </div>
+                <input type="file" x-ref="imageInput" accept="image/jpeg,image/png,image/webp" class="hidden"
+                  @change="handleImageSelect($event)">
               </div>
               
               <div class="mb-4">
@@ -580,6 +606,7 @@
           title: '',
           description: '',
           image_url: '',
+          imageFile: null,
           product_url: ''
         },
         
@@ -663,7 +690,49 @@
         },
         
         showAddProduct() {
-          this.newProduct = { category_id: '', title: '', description: '', image_url: '', product_url: '' };
+          this.newProduct = { category_id: '', title: '', description: '', image_url: '', imageFile: null, product_url: '' };
+        },
+        
+        handleImageSelect(event) {
+          const file = event.target.files[0];
+          if (file) this.uploadImage(file);
+        },
+        
+        handleImageDrop(event) {
+          event.target.classList.remove('border-primary');
+          const file = event.dataTransfer.files[0];
+          if (file && file.type.startsWith('image/')) {
+            this.uploadImage(file);
+          } else {
+            this.showToast('请上传图片文件');
+          }
+        },
+        
+        async uploadImage(file) {
+          if (file.size > 5 * 1024 * 1024) {
+            this.showToast('图片不能超过 5MB');
+            return;
+          }
+          
+          this.newProduct.imageFile = file;
+          this.newProduct.image_url = '';
+          
+          const ext = file.name.split('.').pop();
+          const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const filepath = `products/${filename}`;
+          
+          const { data, error } = await supabase.storage
+            .from('images')
+            .upload(filepath, file, { cacheControl: '3600', upsert: false });
+          
+          this.newProduct.imageFile = null;
+          
+          if (error) {
+            this.showToast('图片上传失败: ' + error.message);
+          } else {
+            const { data: urlData } = supabase.storage.from('images').getPublicUrl(filepath);
+            this.newProduct.image_url = urlData.publicUrl;
+          }
         },
         
         async submitProduct() {
