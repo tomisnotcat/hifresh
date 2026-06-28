@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hifresh - 商品点评社区</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#FF6B35',
+            secondary: '#2EC4B6',
+            dark: '#1A1A2E',
+            gold: '#F59E0B',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .category-scroll::-webkit-scrollbar { display: none; }
+    .category-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+    .fade-in { animation: fadeIn 0.3s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="bg-[#FAFAFA] font-sans text-dark min-h-screen" x-data="hifresh()" x-init="init()">
+
+  <!-- 导航栏 -->
+  <nav class="bg-white shadow-sm sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2 cursor-pointer" @click="goHome()">
+        <div class="w-10 h-10 bg-gradient-to-br from-primary to-secondary rounded-xl flex items-center justify-center">
+          <span class="text-white font-bold text-lg">H</span>
+        </div>
+        <span class="font-bold text-xl text-dark">Hifresh</span>
+      </div>
+      
+      <div class="flex-1 max-w-md mx-4 hidden md:block">
+        <div class="relative">
+          <input type="text" x-model="searchQuery" @keyup.enter="loadProducts()" 
+            placeholder="搜索商品..." 
+            class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-full focus:outline-none focus:border-primary text-sm">
+          <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-3">
+        <button @click="handleAddProduct()" 
+          class="bg-primary text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-orange-600 transition flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          <span class="hidden sm:inline">发布商品</span>
+        </button>
+        
+        <template x-if="!currentUser">
+          <button @click="showAuthModal = true; authMode = 'login'" 
+            class="text-gray-600 hover:text-primary text-sm font-medium">登录</button>
+        </template>
+        <template x-if="currentUser">
+          <div class="relative" x-data="{ open: false }">
+            <button @click="open = !open" class="flex items-center gap-2">
+              <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center overflow-hidden">
+                <template x-if="currentUser.user_metadata?.avatar_url">
+                  <img :src="currentUser.user_metadata.avatar_url" class="w-full h-full object-cover">
+                </template>
+                <template x-if="!currentUser.user_metadata?.avatar_url">
+                  <span class="text-gray-500 text-sm font-medium" x-text="(currentUser.user_metadata?.username || 'U')[0]?.toUpperCase()"></span>
+                </template>
+              </div>
+            </button>
+            <div x-show="open" @click.away="open = false" x-cloak 
+              class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 z-50 fade-in">
+              <div class="px-4 py-2 border-b">
+                <p class="font-medium text-sm" x-text="currentUser.user_metadata?.username || '用户'"></p>
+                <p class="text-gray-500 text-xs truncate" x-text="currentUser.email || currentUser.phone"></p>
+              </div>
+              <button @click="signOut(); open = false" class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-50">退出登录</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 移动端搜索 -->
+  <div class="md:hidden px-4 py-3 bg-white border-b">
+    <div class="relative">
+      <input type="text" x-model="searchQuery" @keyup.enter="loadProducts()" 
+        placeholder="搜索商品..." 
+        class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-full focus:outline-none focus:border-primary text-sm">
+      <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- 分类标签 -->
+  <div class="bg-white border-b sticky top-[60px] md:top-[52px] z-40">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="flex gap-2 py-3 overflow-x-auto category-scroll">
+        <button @click="selectedCategory = null; loadProducts()" 
+          :class="selectedCategory === null ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+          class="px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition">
+          全部
+        </button>
+        <template x-for="cat in categories" :key="cat.id">
+          <button @click="selectedCategory = cat.id; loadProducts()" 
+            :class="selectedCategory === cat.id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+            class="px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition flex items-center gap-1">
+            <span x-text="cat.icon"></span>
+            <span x-text="cat.name"></span>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主内容区 -->
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    
+    <!-- 首页：商品瀑布流 -->
+    <template x-if="currentView === 'home'">
+      <div class="fade-in">
+        <template x-if="loading">
+          <div class="flex items-center justify-center py-20">
+            <div class="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full"></div>
+          </div>
+        </template>
+        
+        <template x-if="!loading && products.length === 0">
+          <div class="text-center py-20">
+            <div class="text-6xl mb-4">📦</div>
+            <h3 class="text-xl font-medium text-gray-600 mb-2">还没有商品</h3>
+            <p class="text-gray-400 mb-4">成为第一个发布者吧！</p>
+            <button @click="currentView = 'add-product'" 
+              class="bg-primary text-white px-6 py-2 rounded-full hover:bg-orange-600 transition">
+              发布商品
+            </button>
+          </div>
+        </template>
+        
+        <template x-if="!loading && products.length > 0">
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <template x-for="product in products" :key="product.id">
+              <div @click="viewProduct(product)" class="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition cursor-pointer fade-in group">
+                <div class="aspect-square bg-gray-100 relative overflow-hidden">
+                  <template x-if="product.image_url">
+                    <img :src="product.image_url" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" @error="$el.src='https://via.placeholder.com/400x400?text=No+Image'">
+                  </template>
+                  <template x-if="!product.image_url">
+                    <div class="w-full h-full flex items-center justify-center text-4xl" x-text="getCategoryIcon(product.category_id)"></div>
+                  </template>
+                  <div class="absolute top-2 left-2 bg-white/90 backdrop-blur px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1">
+                    <span x-text="getCategoryIcon(product.category_id)"></span>
+                    <span x-text="getCategoryName(product.category_id)"></span>
+                  </div>
+                </div>
+                <div class="p-3">
+                  <h3 class="font-medium text-sm line-clamp-2 mb-2 min-h-[2.5rem]" x-text="product.title"></h3>
+                  <div class="flex items-center gap-2 mb-2">
+                    <div class="flex items-center">
+                      <template x-for="i in 10" :key="i">
+                        <span :class="i <= Math.round(product.avg_rating) ? 'text-amber-400' : 'text-gray-200'" class="text-xs">★</span>
+                      </template>
+                    </div>
+                    <span class="text-amber-500 font-medium text-sm" x-text="product.avg_rating || '0'"></span>
+                    <span class="text-gray-400 text-xs" x-text="product.review_count + '条点评'"></span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-xs text-gray-400">
+                    <div class="w-5 h-5 bg-gray-100 rounded-full flex items-center justify-center overflow-hidden">
+                      <span x-text="(product.profiles?.username || 'U')[0]?.toUpperCase()"></span>
+                    </div>
+                    <span x-text="product.profiles?.username || '匿名用户'"></span>
+                    <span class="ml-auto" x-text="formatTime(product.created_at)"></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- 商品详情页 -->
+    <template x-if="currentView === 'product-detail'">
+      <div class="fade-in">
+        <button @click="goHome()" class="flex items-center gap-1 text-gray-500 hover:text-primary mb-4 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          返回
+        </button>
+        
+        <template x-if="!selectedProduct">
+          <div class="text-center py-20">加载中...</div>
+        </template>
+        
+        <template x-if="selectedProduct">
+          <div class="bg-white rounded-xl overflow-hidden shadow-sm">
+            <div class="md:flex">
+              <div class="md:w-1/2 bg-gray-50 aspect-square md:aspect-auto">
+                <template x-if="selectedProduct.image_url">
+                  <img :src="selectedProduct.image_url" class="w-full h-full object-contain" @error="$el.src='https://via.placeholder.com/400x400?text=No+Image'">
+                </template>
+                <template x-if="!selectedProduct.image_url">
+                  <div class="w-full h-full flex items-center justify-center text-8xl" x-text="getCategoryIcon(selectedProduct.category_id)"></div>
+                </template>
+              </div>
+              <div class="md:w-1/2 p-6">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded flex items-center gap-1">
+                    <span x-text="getCategoryIcon(selectedProduct.category_id)"></span>
+                    <span x-text="getCategoryName(selectedProduct.category_id)"></span>
+                  </span>
+                </div>
+                <h1 class="text-xl font-bold mb-4" x-text="selectedProduct.title"></h1>
+                <p class="text-gray-600 mb-4" x-text="selectedProduct.description || '暂无描述'"></p>
+                
+                <div class="flex items-center gap-4 mb-4">
+                  <div class="flex items-center gap-1">
+                    <template x-for="i in 10" :key="i">
+                      <span :class="i <= Math.round(selectedProduct.avg_rating) ? 'text-amber-400' : 'text-gray-200'" class="text-lg">★</span>
+                    </template>
+                  </div>
+                  <span class="text-amber-500 font-bold text-2xl" x-text="selectedProduct.avg_rating || '0'"></span>
+                  <span class="text-gray-400" x-text="selectedProduct.review_count + '条点评'"></span>
+                </div>
+                
+                <div class="flex items-center gap-3 mb-6">
+                  <div class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center overflow-hidden">
+                    <span x-text="(selectedProduct.profiles?.username || 'U')[0]?.toUpperCase()"></span>
+                  </div>
+                  <div>
+                    <p class="font-medium text-sm" x-text="selectedProduct.profiles?.username || '匿名用户'"></p>
+                    <p class="text-gray-400 text-xs" x-text="formatTime(selectedProduct.created_at)"></p>
+                  </div>
+                </div>
+                
+                <template x-if="selectedProduct.product_url">
+                  <a :href="selectedProduct.product_url" target="_blank" 
+                    class="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-full hover:bg-orange-600 transition">
+                    <span>查看原文链接</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                  </a>
+                </template>
+              </div>
+            </div>
+            
+            <!-- 点评区 -->
+            <div class="border-t p-6">
+              <h2 class="font-bold text-lg mb-4">用户点评 (<span x-text="selectedProduct.review_count"></span>)</h2>
+              
+              <template x-if="currentUser">
+                <div class="bg-gray-50 rounded-xl p-4 mb-6">
+                  <h3 class="font-medium mb-3">发布点评</h3>
+                  <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">评分（1-10分）</label>
+                    <div class="flex items-center gap-1">
+                      <template x-for="i in 10" :key="i">
+                        <button @click="newReview.rating = i" type="button"
+                          :class="i <= newReview.rating ? 'text-amber-400' : 'text-gray-200'"
+                          class="text-2xl hover:scale-110 transition">★</button>
+                      </template>
+                      <span class="ml-2 text-amber-500 font-medium" x-text="newReview.rating + '分'"></span>
+                    </div>
+                  </div>
+                  <div class="mb-3">
+                    <label class="block text-sm text-gray-600 mb-1">说说你的看法</label>
+                    <textarea x-model="newReview.content" rows="3" 
+                      class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary resize-none"
+                      placeholder="这款商品怎么样？分享你的使用体验..."></textarea>
+                  </div>
+                  <button @click="submitReview()" 
+                    class="bg-primary text-white px-6 py-2 rounded-full hover:bg-orange-600 transition disabled:opacity-50"
+                    :disabled="!newReview.rating || submitting">
+                    <span x-text="submitting ? '提交中...' : '发布点评'"></span>
+                  </button>
+                </div>
+              </template>
+              
+              <template x-if="!currentUser">
+                <div class="bg-gray-50 rounded-xl p-4 mb-6 text-center">
+                  <p class="text-gray-500 mb-2">登录后才能发布点评</p>
+                  <button @click="showAuthModal = true; authMode = 'login'" 
+                    class="bg-primary text-white px-6 py-2 rounded-full hover:bg-orange-600 transition">
+                    登录
+                  </button>
+                </div>
+              </template>
+              
+              <template x-if="loadingReviews">
+                <div class="text-center py-8">加载中...</div>
+              </template>
+              
+              <template x-if="!loadingReviews && reviews.length === 0">
+                <div class="text-center py-8 text-gray-400">
+                  <div class="text-4xl mb-2">💬</div>
+                  <p>还没有点评，来抢沙发吧！</p>
+                </div>
+              </template>
+              
+              <div class="space-y-4">
+                <template x-for="review in reviews" :key="review.id">
+                  <div class="border-b border-gray-100 pb-4 last:border-0">
+                    <div class="flex items-start gap-3">
+                      <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span x-text="(review.profiles?.username || 'U')[0]?.toUpperCase()"></span>
+                      </div>
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="font-medium text-sm" x-text="review.profiles?.username || '匿名用户'"></span>
+                          <div class="flex items-center">
+                            <template x-for="i in 10" :key="i">
+                              <span :class="i <= review.rating ? 'text-amber-400' : 'text-gray-200'" class="text-xs">★</span>
+                            </template>
+                          </div>
+                          <span class="text-amber-500 text-sm font-medium" x-text="review.rating + '分'"></span>
+                        </div>
+                        <p class="text-gray-700 text-sm mb-1" x-text="review.content"></p>
+                        <p class="text-gray-400 text-xs" x-text="formatTime(review.created_at)"></p>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- 发布商品页 -->
+    <template x-if="currentView === 'add-product'">
+      <div class="fade-in max-w-lg mx-auto">
+        <button @click="goHome()" class="flex items-center gap-1 text-gray-500 hover:text-primary mb-4 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          返回
+        </button>
+        
+        <div class="bg-white rounded-xl p-6 shadow-sm">
+          <h2 class="font-bold text-xl mb-6">发布商品</h2>
+          
+          <template x-if="!currentUser">
+            <div class="text-center py-8">
+              <p class="text-gray-500 mb-4">登录后才能发布商品</p>
+              <button @click="showAuthModal = true; authMode = 'login'" 
+                class="bg-primary text-white px-6 py-2 rounded-full hover:bg-orange-600 transition">
+                登录
+              </button>
+            </div>
+          </template>
+          
+          <template x-if="currentUser">
+            <form @submit.prevent="submitProduct()">
+              <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品分类 *</label>
+                <select x-model="newProduct.category_id" required
+                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary">
+                  <option value="">选择分类</option>
+                  <template x-for="cat in categories" :key="cat.id">
+                    <option :value="cat.id" x-text="cat.icon + ' ' + cat.name"></option>
+                  </template>
+                </select>
+              </div>
+              
+              <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品名称 *</label>
+                <input type="text" x-model="newProduct.title" required
+                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+                  placeholder="输入商品名称">
+              </div>
+              
+              <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品图片链接</label>
+                <input type="url" x-model="newProduct.image_url"
+                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+                  placeholder="https://example.com/image.jpg">
+              </div>
+              
+              <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品链接</label>
+                <input type="url" x-model="newProduct.product_url"
+                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+                  placeholder="https://jd.com/product/123.html">
+              </div>
+              
+              <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">商品描述</label>
+                <textarea x-model="newProduct.description" rows="4"
+                  class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary resize-none"
+                  placeholder="介绍一下这个商品的特点和使用体验..."></textarea>
+              </div>
+              
+              <button type="submit" 
+                class="w-full bg-primary text-white py-3 rounded-full hover:bg-orange-600 transition disabled:opacity-50"
+                :disabled="submitting">
+                <span x-text="submitting ? '发布中...' : '发布商品'"></span>
+              </button>
+            </form>
+          </template>
+        </div>
+      </div>
+    </template>
+
+  </main>
+
+  <!-- 登录/注册弹窗 -->
+  <div x-show="showAuthModal" x-cloak 
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+    @click.self="showAuthModal = false">
+    <div class="bg-white rounded-2xl w-full max-w-md p-6 fade-in" @click.stop>
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-xl font-bold" x-text="authMode === 'login' ? '登录' : '注册'"></h2>
+        <button @click="showAuthModal = false" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      
+      <!-- 登录表单 -->
+      <template x-if="authMode === 'login'">
+        <form @submit.prevent="signIn()" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">登录方式</label>
+            <select x-model="loginType" class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary">
+              <option value="email">邮箱登录</option>
+              <option value="phone">手机号登录</option>
+              <option value="username">用户名登录</option>
+            </select>
+          </div>
+          
+          <template x-if="loginType === 'email'">
+            <input type="email" x-model="loginEmail" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="your@email.com">
+          </template>
+          
+          <template x-if="loginType === 'phone'">
+            <input type="tel" x-model="loginPhone" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="+86 13888888888">
+          </template>
+          
+          <template x-if="loginType === 'username'">
+            <input type="text" x-model="loginUsername" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="用户名">
+          </template>
+          
+          <template x-if="loginType !== 'username'">
+            <input type="password" x-model="loginPassword" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="密码">
+          </template>
+          
+          <button type="submit" :disabled="authLoading"
+            class="w-full bg-primary text-white py-2.5 rounded-full hover:bg-orange-600 transition disabled:opacity-50">
+            <span x-text="authLoading ? '登录中...' : '登录'"></span>
+          </button>
+          
+          <p class="text-center text-sm text-gray-500">
+            还没有账号？ 
+            <button type="button" @click="authMode = 'signup'" class="text-primary font-medium">立即注册</button>
+          </p>
+        </form>
+      </template>
+      
+      <!-- 注册表单 -->
+      <template x-if="authMode === 'signup'">
+        <form @submit.prevent="signUp()" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">注册方式</label>
+            <select x-model="signupType" class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary">
+              <option value="email">邮箱注册</option>
+              <option value="phone">手机号注册</option>
+            </select>
+          </div>
+          
+          <template x-if="signupType === 'email'">
+            <input type="email" x-model="signupEmail" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="your@email.com">
+          </template>
+          
+          <template x-if="signupType === 'phone'">
+            <input type="tel" x-model="signupPhone" required
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+              placeholder="+86 13888888888">
+          </template>
+          
+          <input type="text" x-model="signupUsername" required minlength="3"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+            placeholder="设置用户名（至少3个字符）">
+          
+          <input type="password" x-model="signupPassword" required minlength="6"
+            class="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-primary"
+            placeholder="设置密码（至少6个字符）">
+          
+          <button type="submit" :disabled="authLoading"
+            class="w-full bg-primary text-white py-2.5 rounded-full hover:bg-orange-600 transition disabled:opacity-50">
+            <span x-text="authLoading ? '注册中...' : '注册'"></span>
+          </button>
+          
+          <p class="text-center text-sm text-gray-500">
+            已有账号？ 
+            <button type="button" @click="authMode = 'login'" class="text-primary font-medium">直接登录</button>
+          </p>
+        </form>
+      </template>
+      
+      <p x-show="authError" class="text-red-500 text-sm text-center mt-4" x-text="authError"></p>
+    </div>
+  </div>
+
+  <!-- 提示消息 -->
+  <div x-show="toast.show" x-cloak 
+    class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-dark text-white px-6 py-3 rounded-full shadow-lg z-50 fade-in">
+    <span x-text="toast.message"></span>
+  </div>
+
+  <script>
+    const { createClient } = supabase;
+    
+    const SUPABASE_URL = 'https://atwrmjzguzaihdxtjuhu.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0d3JtanpndXphaWhkeHRqdWh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1OTgyNTUsImV4cCI6MjA5ODE3NDI1NX0.GcLPCHR94gxAG5YXCBbrcuL6w0tqRhCWeryotIFCBpc';
+    
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    function hifresh() {
+      return {
+        currentView: 'home',
+        currentUser: null,
+        categories: [],
+        products: [],
+        selectedProduct: null,
+        reviews: [],
+        selectedCategory: null,
+        searchQuery: '',
+        
+        loading: false,
+        loadingReviews: false,
+        submitting: false,
+        authLoading: false,
+        authError: '',
+        
+        showAuthModal: false,
+        authMode: 'login',
+        loginType: 'email',
+        loginEmail: '',
+        loginPhone: '',
+        loginUsername: '',
+        loginPassword: '',
+        signupType: 'email',
+        signupEmail: '',
+        signupPhone: '',
+        signupUsername: '',
+        signupPassword: '',
+        
+        newProduct: {
+          category_id: '',
+          title: '',
+          description: '',
+          image_url: '',
+          product_url: ''
+        },
+        
+        newReview: {
+          rating: 5,
+          content: ''
+        },
+        
+        toast: {
+          show: false,
+          message: ''
+        },
+        
+        init() {
+          this.loadCategories();
+          this.loadProducts();
+          this.checkUser();
+        },
+        
+        async checkUser() {
+          const { data: { user } } = await supabase.auth.getUser();
+          this.currentUser = user;
+          supabase.auth.onAuthStateChange((event, session) => {
+            this.currentUser = session?.user || null;
+          });
+        },
+        
+        async loadCategories() {
+          const { data } = await supabase
+            .from('categories')
+            .select('*')
+            .order('sort_order');
+          if (data) this.categories = data;
+        },
+        
+        async loadProducts() {
+          this.loading = true;
+          let query = supabase
+            .from('products')
+            .select('*, profiles(username, avatar_url)')
+            .order('created_at', { ascending: false });
+          
+          if (this.selectedCategory) {
+            query = query.eq('category_id', this.selectedCategory);
+          }
+          
+          if (this.searchQuery) {
+            query = query.ilike('title', '%' + this.searchQuery + '%');
+          }
+          
+          const { data } = await query.limit(50);
+          this.loading = false;
+          if (data) this.products = data;
+        },
+        
+        async viewProduct(product) {
+          this.selectedProduct = product;
+          this.currentView = 'product-detail';
+          this.loadReviews(product.id);
+        },
+        
+        async loadReviews(productId) {
+          this.loadingReviews = true;
+          const { data } = await supabase
+            .from('reviews')
+            .select('*, profiles(username, avatar_url)')
+            .eq('product_id', productId)
+            .order('created_at', { ascending: false });
+          this.loadingReviews = false;
+          if (data) this.reviews = data;
+        },
+        
+        goHome() {
+          this.currentView = 'home';
+          this.loadProducts();
+        },
+        
+        handleAddProduct() {
+          this.newProduct = { category_id: '', title: '', description: '', image_url: '', product_url: '' };
+          this.currentView = 'add-product';
+        },
+        
+        showAddProduct() {
+          this.newProduct = { category_id: '', title: '', description: '', image_url: '', product_url: '' };
+        },
+        
+        async submitProduct() {
+          if (!this.currentUser) {
+            this.showAuthModal = true;
+            return;
+          }
+          
+          this.submitting = true;
+          const { data, error } = await supabase
+            .from('products')
+            .insert({
+              category_id: parseInt(this.newProduct.category_id),
+              title: this.newProduct.title,
+              description: this.newProduct.description,
+              image_url: this.newProduct.image_url || null,
+              product_url: this.newProduct.product_url || null,
+              user_id: this.currentUser.id
+            })
+            .select();
+          
+          this.submitting = false;
+          
+          if (error) {
+            this.showToast('发布失败: ' + error.message);
+          } else {
+            this.showToast('发布成功！');
+            this.goHome();
+          }
+        },
+        
+        async submitReview() {
+          if (!this.currentUser) {
+            this.showAuthModal = true;
+            return;
+          }
+          
+          if (!this.newReview.rating || !this.newReview.content.trim()) {
+            this.showToast('请填写评分和点评内容');
+            return;
+          }
+          
+          this.submitting = true;
+          const { data, error } = await supabase
+            .from('reviews')
+            .insert({
+              product_id: this.selectedProduct.id,
+              user_id: this.currentUser.id,
+              rating: this.newReview.rating,
+              content: this.newReview.content
+            })
+            .select();
+          
+          this.submitting = false;
+          
+          if (error) {
+            this.showToast('点评失败: ' + error.message);
+          } else {
+            this.showToast('点评发布成功！');
+            this.newReview = { rating: 5, content: '' };
+            await this.loadReviews(this.selectedProduct.id);
+            // 更新商品评分
+            const { data: updated } = await supabase
+              .from('products')
+              .select('avg_rating, review_count')
+              .eq('id', this.selectedProduct.id)
+              .single();
+            if (updated) {
+              this.selectedProduct.avg_rating = updated.avg_rating;
+              this.selectedProduct.review_count = updated.review_count;
+            }
+          }
+        },
+        
+        async signIn() {
+          this.authError = '';
+          this.authLoading = true;
+          
+          try {
+            if (this.loginType === 'email') {
+              const { error } = await supabase.auth.signInWithPassword({
+                email: this.loginEmail,
+                password: this.loginPassword
+              });
+              if (error) throw error;
+            } else if (this.loginType === 'phone') {
+              const { error } = await supabase.auth.signInWithPassword({
+                phone: this.loginPhone,
+                password: this.loginPassword
+              });
+              if (error) throw error;
+            } else {
+              // 用户名登录：先查用户
+              const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('username', this.loginUsername)
+                .single();
+              if (!profiles) throw new Error('用户名不存在');
+              const { error } = await supabase.auth.signInWithPassword({
+                email: profiles.id + '@hifresh.local',
+                password: this.loginPassword
+              });
+              if (error) throw error;
+            }
+            this.showAuthModal = false;
+            this.showToast('登录成功');
+          } catch (error) {
+            this.authError = error.message;
+          }
+          this.authLoading = false;
+        },
+        
+        async signUp() {
+          this.authError = '';
+          this.authLoading = true;
+          
+          try {
+            if (this.signupType === 'email') {
+              const { error } = await supabase.auth.signUp({
+                email: this.signupEmail,
+                password: this.signupPassword,
+                options: {
+                  data: { username: this.signupUsername }
+                }
+              });
+              if (error) throw error;
+              this.showToast('注册成功！请查收验证邮件');
+            } else {
+              const { error } = await supabase.auth.signUp({
+                phone: this.signupPhone,
+                password: this.signupPassword,
+                options: {
+                  data: { username: this.signupUsername }
+                }
+              });
+              if (error) throw error;
+              this.showToast('注册成功！请输入验证码');
+            }
+            this.authMode = 'login';
+          } catch (error) {
+            this.authError = error.message;
+          }
+          this.authLoading = false;
+        },
+        
+        async signOut() {
+          await supabase.auth.signOut();
+          this.showToast('已退出登录');
+        },
+        
+        getCategoryIcon(categoryId) {
+          const cat = this.categories.find(c => c.id === categoryId);
+          return cat ? cat.icon : '📦';
+        },
+        
+        getCategoryName(categoryId) {
+          const cat = this.categories.find(c => c.id === categoryId);
+          return cat ? cat.name : '其他';
+        },
+        
+        formatTime(dateStr) {
+          if (!dateStr) return '';
+          const date = new Date(dateStr);
+          const now = new Date();
+          const diff = now - date;
+          if (diff < 60000) return '刚刚';
+          if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+          if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+          if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
+          return date.toLocaleDateString('zh-CN');
+        },
+        
+        showToast(message) {
+          this.toast.message = message;
+          this.toast.show = true;
+          setTimeout(() => { this.toast.show = false; }, 3000);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
